@@ -535,6 +535,18 @@ fn audio(ui: &mut Ui, ed: &mut Editor, d: &mut Project) {
         if let Some(m) = &a.music {
             caption(ui, &std::path::Path::new(m).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
             slider(ui, "Music volume", &mut a.music_volume, 0.0..=1.0, "");
+            toggle_row(ui, "Only when the computer is quiet", &mut a.music_in_gaps);
+            caption(
+                ui,
+                if a.music_in_gaps {
+                    "The music fades out while the recording's sound plays, and comes back at the volume above in the gaps."
+                } else {
+                    "Turn on to let the music take over only where the recording's own sound is silent."
+                },
+            );
+            if a.music_in_gaps && ed.rec.meta.system_audio.is_none() {
+                caption(ui, "This recording has no computer sound, so the music plays all the time.");
+            }
         }
     });
     section(ui, "Voice-over", |ui| {

@@ -223,16 +223,23 @@ pub fn soft_clip(x: f32) -> f32 {
 /// Gain envelope for the recorded audio: `level` while any voice-over plays
 /// (with 150 ms ramps), 1 elsewhere.
 pub fn duck_envelope(len: usize, spans: &[(usize, usize)], level: f32) -> Vec<f32> {
-    let mut env = vec![1.0f32; len];
     let ramp = (RATE * 0.15) as usize;
+    gain_envelope(len, spans, level, ramp, ramp)
+}
+
+/// Gain envelope: `level` inside `spans` and 1 elsewhere, easing down over
+/// `ramp_in` samples before a span and back up over `ramp_out` after it.
+pub fn gain_envelope(len: usize, spans: &[(usize, usize)], level: f32, ramp_in: usize, ramp_out: usize) -> Vec<f32> {
+    let mut env = vec![1.0f32; len];
+    let (ramp_in, ramp_out) = (ramp_in.max(1), ramp_out.max(1));
     for &(a, b) in spans {
-        let lo = a.saturating_sub(ramp);
-        let hi = (b + ramp).min(len);
+        let lo = a.saturating_sub(ramp_in);
+        let hi = (b + ramp_out).min(len);
         for (j, e) in env.iter_mut().enumerate().take(hi).skip(lo) {
             let t = if j < a {
-                (a - j) as f32 / ramp as f32
+                (a - j) as f32 / ramp_in as f32
             } else if j >= b {
-                (j - b) as f32 / ramp as f32
+                (j - b) as f32 / ramp_out as f32
             } else {
                 0.0
             };
@@ -241,6 +248,43 @@ pub fn duck_envelope(len: usize, spans: &[(usize, usize)], level: f32) -> Vec<f3
         }
     }
     env
+}
+
+/// Block length used to find where sound plays.
+const SOUND_BLOCK_MS: f64 = 20.0;
+/// Sound separated by less than this counts as one stretch of sound, so the
+/// music doesn't pump between notes and words.
+const SOUND_HOLD_MS: f64 = 400.0;
+/// Sound shorter than this (a click, a pop) isn't a stretch of sound.
+const SOUND_MIN_MS: f64 = 100.0;
+
+/// Where `audio` makes sound, as (start, end) sample ranges. The limit is
+/// relative to the track's own noise floor, so a quiet recording and a
+/// loud one both count; digital silence never does.
+pub fn sound_spans(audio: &[Stereo]) -> Vec<(usize, usize)> {
+    let levels = crate::engine::silence::levels(audio, RATE);
+    let limit = crate::engine::silence::threshold(&levels);
+    let block = ((RATE * SOUND_BLOCK_MS / 1000.0) as usize).max(1);
+    let (hold, min) = ((SOUND_HOLD_MS / SOUND_BLOCK_MS) as usize, (SOUND_MIN_MS / SOUND_BLOCK_MS) as usize);
+    // Runs of blocks above the limit, joined across gaps shorter than `hold`.
+    let mut runs: Vec<(usize, usize)> = vec![];
+    for (i, &l) in levels.iter().enumerate() {
+        if l < limit {
+            continue;
+        }
+        match runs.last_mut() {
+            Some(last) if i - last.1 <= hold => last.1 = i + 1,
+            _ => runs.push((i, i + 1)),
+        }
+    }
+    runs.into_iter().filter(|&(a, b)| b - a >= min).map(|(a, b)| (a * block, (b * block).min(audio.len()))).collect()
+}
+
+/// Gain for the background music: gone while the recording's own sound
+/// plays and back, softly at first, in the gaps between. Needs 1 sample per
+/// sample of `system`.
+pub fn music_gaps_envelope(system: &[Stereo]) -> Vec<f32> {
+    gain_envelope(system.len(), &sound_spans(system), 0.0, (RATE * 0.15) as usize, (RATE * 0.8) as usize)
 }
 
 /// The soundtrack split in two: what the Mac played (with the music and click
@@ -342,11 +386,14 @@ fn stems_unmastered(project: &Project, rec: &Recording, dir: Option<&Path>, map:
     }
     if let Some(music) = style.music.as_ref().and_then(|p| crate::media::read_audio(Path::new(p), 0).ok()).filter(|m| !m.is_empty()) {
         let g = style.music_volume as f32;
+        // Only in the gaps: judged from the computer's sound as it is now, before the music is added.
+        let gaps = style.music_in_gaps.then(|| music_gaps_envelope(&system));
         // Fade the music out over the last second.
         let n = system.len();
         let fade = (RATE as usize).min(n).max(1);
         for (j, o) in system.iter_mut().enumerate() {
             let f = if j + fade > n { (n - j) as f32 / fade as f32 } else { 1.0 };
+            let f = f * gaps.as_ref().map_or(1.0, |e| e[j]);
             let s = music[j % music.len()];
             o[0] += s[0] * g * f;
             o[1] += s[1] * g * f;
@@ -411,6 +458,67 @@ mod tests {
         // Compare the settled second halves of each passage.
         let after = 20.0 * (rms(&buf[n + n / 2..]) / rms(&buf[n / 2..n])).log10();
         assert!(before > 11.0 && after < before - 4.0, "loud/quiet gap {before:.1} dB -> {after:.1} dB");
+    }
+
+    /// `secs` of a 440 Hz tone at `amp` starting at `from` seconds, over silence, `total` seconds long.
+    fn sounds(total: f64, parts: &[(f64, f64, f32)]) -> Vec<Stereo> {
+        let mut out = vec![[0.0f32; 2]; (total * RATE) as usize];
+        for &(from, secs, amp) in parts {
+            let start = (from * RATE) as usize;
+            for k in 0..(secs * RATE) as usize {
+                let v = amp * (std::f32::consts::TAU * 440.0 * k as f32 / RATE as f32).sin();
+                if let Some(o) = out.get_mut(start + k) {
+                    *o = [v, v];
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn sound_spans_find_the_stretches_of_sound() {
+        // Sound from 1 to 2 s and 2.2 to 3 s (a short pause between: one stretch), then a 50 ms click at 5 s.
+        let a = sounds(6.0, &[(1.0, 1.0, 0.1), (2.2, 0.8, 0.1), (5.0, 0.05, 0.3)]);
+        let spans = sound_spans(&a);
+        assert_eq!(spans.len(), 1, "{spans:?}");
+        let (s, e) = (spans[0].0 as f64 / RATE, spans[0].1 as f64 / RATE);
+        assert!((s - 1.0).abs() < 0.04 && (e - 3.0).abs() < 0.04, "{s} {e}");
+        // A long pause (over 0.4 s) splits it in two.
+        let b = sounds(6.0, &[(1.0, 1.0, 0.1), (3.0, 1.0, 0.1)]);
+        assert_eq!(sound_spans(&b).len(), 2);
+        // Nothing, or digital silence, is no sound at all; a track that never stops is one stretch.
+        assert!(sound_spans(&sounds(4.0, &[])).is_empty());
+        assert_eq!(sound_spans(&sounds(4.0, &[(0.0, 4.0, 0.1)])).len(), 1);
+    }
+
+    #[test]
+    fn music_is_gone_under_the_computers_sound_and_comes_back_slowly() {
+        let system = sounds(8.0, &[(2.0, 2.0, 0.1)]);
+        let env = music_gaps_envelope(&system);
+        let at = |s: f64| env[(s * RATE) as usize];
+        assert_eq!(env.len(), system.len());
+        assert_eq!(at(0.5), 1.0, "before it");
+        assert_eq!(at(3.0), 0.0, "under it");
+        assert!(at(1.9) < 1.0 && at(1.9) > 0.0, "already on its way down just before");
+        // 0.4 s after the sound it is only part way back; after a second it is all the way.
+        assert!(at(4.4) > 0.0 && at(4.4) < 1.0, "{}", at(4.4));
+        assert_eq!(at(5.2), 1.0);
+        assert_eq!(at(7.0), 1.0);
+        // No computer sound: the music is never held back.
+        assert!(music_gaps_envelope(&sounds(3.0, &[])).iter().all(|&g| g == 1.0));
+    }
+
+    #[test]
+    fn gain_envelope_can_ease_down_and_up_at_different_speeds() {
+        let r = RATE as usize;
+        let env = gain_envelope(4 * r, &[(r, 2 * r)], 0.0, r / 10, r);
+        assert_eq!(env[0], 1.0);
+        assert!((env[r - r / 20] - 0.5).abs() < 0.01, "half way down in the middle of the short ramp");
+        assert_eq!(env[r + 10], 0.0);
+        assert!((env[2 * r + r / 2] - 0.5).abs() < 0.01, "half way up in the middle of the long ramp");
+        assert_eq!(env[3 * r + 10], 1.0);
+        // The old ducking still ramps 150 ms both ways.
+        assert_eq!(duck_envelope(4 * r, &[(r, 2 * r)], 0.2), gain_envelope(4 * r, &[(r, 2 * r)], 0.2, (RATE * 0.15) as usize, (RATE * 0.15) as usize));
     }
 
     #[test]
