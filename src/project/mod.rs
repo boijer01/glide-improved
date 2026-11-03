@@ -12,8 +12,10 @@
 //!     keys.json         key presses
 //!     cursors.json      cursor images (PNG files in cursors/)
 //!     transcript.json   captions, once transcribed
+//!     beats.json        the hits effects follow, once found
 //! ```
 
+pub mod beats;
 pub mod model;
 pub mod presets;
 pub mod recording;
@@ -61,6 +63,8 @@ impl Package {
             keys: read_json_or_default(&self.rec("keys.json"))?,
             cursors: read_json_or_default(&self.rec("cursors.json"))?,
             transcript: read_json_or_default(&self.rec("transcript.json"))?,
+            // Whatever was found last; `beats::analyze` checks it is still the right audio.
+            beats: read_json_or_default::<beats::Cache>(&self.rec("beats.json")).unwrap_or_default().beats,
         })
     }
 
@@ -126,7 +130,7 @@ pub fn read_json<T: DeserializeOwned>(path: &Path) -> Result<T> {
     serde_json::from_str(&s).with_context(|| format!("parsing {}", path.display()))
 }
 
-fn read_json_or_default<T: DeserializeOwned + Default>(path: &Path) -> Result<T> {
+pub fn read_json_or_default<T: DeserializeOwned + Default>(path: &Path) -> Result<T> {
     if path.exists() { read_json(path) } else { Ok(T::default()) }
 }
 
