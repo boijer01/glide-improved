@@ -248,7 +248,7 @@ impl Scene {
 
     fn screen_values(&mut self, f: i64) -> Vec<f64> {
         let (map, sizes, tl, events) = (&self.map, &self.sizes, &self.project.timeline, &self.events);
-        let spring = self.project.style.screen_spring;
+        let (spring, stay) = (self.project.style.screen_spring, self.project.style.stay_zoomed);
         let cm = CursorModel {
             events,
             style: &self.project.style.cursor,
@@ -258,7 +258,7 @@ impl Scene {
         };
         self.anim.screen.values_at(f, |pb| {
             let src = map.to_source(pb);
-            let focus = zoom::focus_at(tl, events, sizes, src, cm.target(src));
+            let focus = zoom::focus_at(tl, events, sizes, src, cm.target(src), stay);
             let (scale, off) = zoom::place(sizes, focus);
             Target { values: vec![scale, off.x, off.y], spring, snap: zoom::is_instant_edge(&tl.zooms, src) }
         })
@@ -484,7 +484,7 @@ impl Scene {
             let out = self.sizes.output;
             let b = self.anim.bubble.values_at(f, |pb| {
                 let s = map.to_source(pb);
-                let zoomed = zoom::active(&zooms, s).is_some();
+                let zoomed = zoom::zoomed_at(&zooms, s, style.stay_zoomed);
                 let r = camera::bubble_at(&cs, &layouts, out, video, s, zoomed);
                 Target { values: vec![r.x, r.y, r.w, r.h], spring: style.screen_spring, snap: zoom::is_instant_edge(&zooms, s) }
             });

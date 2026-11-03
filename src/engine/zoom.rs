@@ -140,9 +140,21 @@ pub fn place(sizes: &Sizes, focus: Focus) -> (f64, Vec2) {
     (scale, pos - body.min())
 }
 
+/// The enabled zoom that ended last before source time `t`. With "never zoom
+/// out", a gap keeps this zoom's level.
+pub fn held(zooms: &[Zoom], t: f64) -> Option<&Zoom> {
+    zooms.iter().filter(|z| !z.disabled && z.end < t).max_by(|a, b| a.end.total_cmp(&b.end))
+}
+
+/// Whether the screen is zoomed in at `t`: inside a zoom, or after one when
+/// `stay_zoomed` is on.
+pub fn zoomed_at(zooms: &[Zoom], t: f64, stay_zoomed: bool) -> bool {
+    active(zooms, t).is_some() || (stay_zoomed && held(zooms, t).is_some())
+}
+
 /// Zoom focus at source time `t`; gaps between zooms gently follow the
-/// cursor at zoom 1.
-pub fn focus_at(timeline: &Timeline, events: &Events, sizes: &Sizes, t: f64, cursor: Option<Vec2>) -> Focus {
+/// cursor, at zoom 1 or, with `stay_zoomed`, at the previous zoom's level.
+pub fn focus_at(timeline: &Timeline, events: &Events, sizes: &Sizes, t: f64, cursor: Option<Vec2>, stay_zoomed: bool) -> Focus {
     let center = sizes.crop.center();
     match active(&timeline.zooms, t) {
         Some(z) => {
@@ -154,7 +166,10 @@ pub fn focus_at(timeline: &Timeline, events: &Events, sizes: &Sizes, t: f64, cur
             let snap = if matches!(z.mode, ZoomMode::Manual { .. }) { 0.0 } else { z.snap_edges };
             Focus { point, zoom: z.scale.max(1.0), snap }
         }
-        None => Focus { point: cursor.unwrap_or(center), zoom: 1.0, snap: FOLLOW_SNAP },
+        None => {
+            let zoom = if stay_zoomed { held(&timeline.zooms, t).map_or(1.0, |z| z.scale.max(1.0)) } else { 1.0 };
+            Focus { point: cursor.unwrap_or(center), zoom, snap: FOLLOW_SNAP }
+        }
     }
 }
 
@@ -203,6 +218,35 @@ mod tests {
         // Centre focus: overflow split evenly.
         let (_, off) = place(&sizes, Focus { point: v2(960.0, 540.0), zoom: 2.0, snap: 0.25 });
         assert!((off.x + 960.0).abs() < 1.0, "{off:?}");
+    }
+
+    #[test]
+    fn stay_zoomed_keeps_the_previous_level_in_gaps() {
+        let mut tl = Timeline::default();
+        tl.zooms = vec![
+            Zoom { start: 1000.0, end: 3000.0, scale: 2.5, ..Default::default() },
+            Zoom { start: 6000.0, end: 8000.0, scale: 1.8, ..Default::default() },
+            Zoom { start: 9000.0, end: 9500.0, scale: 3.0, disabled: true, ..Default::default() },
+        ];
+        let events = Events::new(vec![]);
+        let sizes = Sizes::new(&Style::default(), v2(1920.0, 1080.0));
+        let cursor = Some(v2(400.0, 300.0));
+        let zoom = |t: f64, stay: bool| focus_at(&tl, &events, &sizes, t, cursor, stay).zoom;
+        // Off: every gap is the full screen.
+        assert_eq!(zoom(4000.0, false), 1.0);
+        // On: before the first zoom stays full, gaps keep the zoom before them,
+        // disabled zooms don't count, and the end holds the last level.
+        assert_eq!(zoom(500.0, true), 1.0);
+        assert_eq!(zoom(4000.0, true), 2.5);
+        assert_eq!(zoom(8500.0, true), 1.8);
+        assert_eq!(zoom(12_000.0, true), 1.8);
+        // Inside a zoom nothing changes.
+        assert_eq!(zoom(7000.0, true), 1.8);
+        // Gaps still follow the cursor.
+        assert_eq!(focus_at(&tl, &events, &sizes, 4000.0, cursor, true).point, v2(400.0, 300.0));
+        assert!(!zoomed_at(&tl.zooms, 500.0, true));
+        assert!(zoomed_at(&tl.zooms, 4000.0, true));
+        assert!(!zoomed_at(&tl.zooms, 4000.0, false));
     }
 
     #[test]

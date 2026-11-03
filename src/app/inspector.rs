@@ -670,6 +670,15 @@ fn animation(ui: &mut Ui, ed: &mut Editor, d: &mut Project) {
     });
     section(ui, "Automatic zooms", |ui| {
         slider(ui, "Default zoom", &mut d.style.default_zoom, 1.2..=4.0, "×");
+        toggle_row(ui, "Never zoom out", &mut d.style.stay_zoomed);
+        caption(
+            ui,
+            if d.style.stay_zoomed {
+                "After the first zoom the picture stays zoomed in. Between zooms it keeps the last zoom's level and follows the mouse."
+            } else {
+                "Between zooms the picture goes back to the full screen. Turn on to stay zoomed in."
+            },
+        );
         if ui.button("Regenerate from clicks").clicked() {
             let events = crate::engine::events::Events::new(ed.rec.mouse.clone());
             let zooms = crate::engine::zoom::auto_zooms(&events.downs, ed.rec.meta.duration_ms, d.style.default_zoom, &mut d.timeline);
