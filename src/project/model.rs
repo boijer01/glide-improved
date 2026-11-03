@@ -387,6 +387,9 @@ pub struct AudioStyle {
     pub enhance_mic: bool,
     pub music: Option<String>,
     pub music_volume: f64,
+    /// Play the music only in the gaps in the recording's own (computer)
+    /// sound: it fades out while that plays.
+    pub music_in_gaps: bool,
     pub click_sounds: bool,
     pub click_volume: f64,
     /// Lower the recorded audio while a voice-over plays.
@@ -404,6 +407,7 @@ impl Default for AudioStyle {
             enhance_mic: true,
             music: None,
             music_volume: 0.05,
+            music_in_gaps: false,
             click_sounds: false,
             click_volume: 0.25,
             duck_under_voiceover: true,
