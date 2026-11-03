@@ -851,44 +851,46 @@ impl Editor {
 
     fn presets_menu(&mut self, ui: &mut Ui) {
         use crate::project::presets;
-        ui.menu_button("Presets", |ui| {
-            ui.set_min_width(220.0);
+        ui.menu_button("Templates", |ui| {
+            ui.set_min_width(240.0);
             let list = presets::list();
             let default = presets::default_name();
             if list.is_empty() {
-                ui.label(RichText::new("No presets yet").color(pal(ui).secondary));
+                ui.label(RichText::new("No templates yet").color(pal(ui).secondary));
             }
             for p in &list {
-                let label = if default.as_deref() == Some(p.name.as_str()) { format!("{}  (default)", p.name) } else { p.name.clone() };
-                if ui.button(label).on_hover_text("Apply this style").clicked() {
+                let label = if default.as_deref() == Some(p.name.as_str()) { format!("{}  (new recordings)", p.name) } else { p.name.clone() };
+                if ui.button(label).on_hover_text("Use this template's look, audio, export settings and effects here").clicked() {
                     match presets::load(p) {
-                        Ok(style) => {
-                            self.edit(|d| presets::apply(&mut d.style, &style));
-                            self.status = Some(format!("Applied preset “{}”", p.name));
+                        Ok(t) => {
+                            let (duration, pkg) = (self.rec.meta.duration_ms, self.package.clone());
+                            self.edit(|d| presets::apply_template(d, &t, duration, Some(&pkg)));
+                            self.status = Some(format!("Applied template “{}”", p.name));
                         }
-                        Err(e) => self.status = Some(format!("Couldn't load preset: {e:#}")),
+                        Err(e) => self.status = Some(format!("Couldn't load template: {e:#}")),
                     }
                     ui.close();
                 }
             }
             ui.separator();
-            ui.label(RichText::new("Save current style as").color(pal(ui).secondary));
+            ui.label(RichText::new("Save as template").color(pal(ui).secondary))
+                .on_hover_text("Keeps the look, aspect ratio, captions, camera, audio and music, export settings and effects over the whole clip");
             ui.horizontal(|ui| {
-                let field = ui.add(egui::TextEdit::singleline(&mut self.preset_name).hint_text("Preset name").desired_width(140.0));
+                let field = ui.add(egui::TextEdit::singleline(&mut self.preset_name).hint_text("Template name").desired_width(150.0));
                 let enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                 if (ui.add_enabled(!self.preset_name.trim().is_empty(), egui::Button::new("Save")).clicked() || enter)
                     && !self.preset_name.trim().is_empty()
                 {
-                    match presets::save(&self.preset_name, &self.project.style, Some(&self.package.root)) {
-                        Ok(p) => self.status = Some(format!("Saved preset “{}”", p.name)),
-                        Err(e) => self.status = Some(format!("Couldn't save preset: {e:#}")),
+                    match presets::save(&self.preset_name, &self.project, self.rec.meta.duration_ms, Some(&self.package.root)) {
+                        Ok(p) => self.status = Some(format!("Saved template “{}”", p.name)),
+                        Err(e) => self.status = Some(format!("Couldn't save template: {e:#}")),
                     }
                     self.preset_name.clear();
                 }
             });
             if !list.is_empty() {
                 ui.separator();
-                ui.menu_button("Default for new recordings", |ui| {
+                ui.menu_button("Use for new recordings", |ui| {
                     if ui.selectable_label(default.is_none(), "None").clicked() {
                         let _ = presets::set_default(None);
                         ui.close();
@@ -900,11 +902,11 @@ impl Editor {
                         }
                     }
                 });
-                ui.menu_button("Delete preset", |ui| {
+                ui.menu_button("Delete template", |ui| {
                     for p in &list {
                         if ui.button(&p.name).clicked() {
                             if let Err(e) = presets::delete(p) {
-                                self.status = Some(format!("Couldn't delete preset: {e:#}"));
+                                self.status = Some(format!("Couldn't delete template: {e:#}"));
                             }
                             ui.close();
                         }
