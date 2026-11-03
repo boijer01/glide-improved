@@ -589,9 +589,9 @@ impl Recorder {
         project::write_json(&pkg.rec("cursors.json"), &cursors)?;
         let rec = pkg.load_recording()?;
         let mut proj = project::new_project(&pkg.name(), &rec);
-        // The user's default style preset, if any; auto zooms take its zoom level.
-        if let Some(style) = project::presets::default_style() {
-            project::presets::apply(&mut proj.style, &style);
+        // The template for new recordings, if any; auto zooms take its zoom level.
+        if let Some(t) = project::presets::default_template() {
+            project::presets::apply_template(&mut proj, &t, rec.meta.duration_ms, Some(&pkg));
             for z in &mut proj.timeline.zooms {
                 z.scale = proj.style.default_zoom;
             }
