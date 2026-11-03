@@ -536,7 +536,7 @@ impl Editor {
         if self.beats_job.is_some() {
             return;
         }
-        let wanted = if self.project.timeline.effects.is_empty() { None } else { crate::project::beats::wanted(&self.project, &self.rec, &self.package) };
+        let wanted = if self.project.timeline.needs_beats() { crate::project::beats::wanted(&self.project, &self.rec, &self.package) } else { None };
         match wanted {
             Some(w) if self.beats_key.as_deref() != Some(&w.key) => {
                 let pkg = self.package.clone();
@@ -650,7 +650,7 @@ impl Editor {
     /// Whether the hits effects follow are in `rec.beats` (true when no
     /// effect needs them).
     fn beats_ready(&self) -> bool {
-        if self.project.timeline.effects.is_empty() {
+        if !self.project.timeline.needs_beats() {
             return true;
         }
         match crate::project::beats::wanted(&self.project, &self.rec, &self.package) {

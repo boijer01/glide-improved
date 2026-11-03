@@ -7,6 +7,7 @@ pub mod camera;
 pub mod captions;
 pub mod cursor;
 pub mod device;
+pub mod drift;
 pub mod events;
 pub mod geom;
 pub mod keys;
