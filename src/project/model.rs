@@ -396,6 +396,61 @@ pub struct AudioStyle {
     pub duck_under_voiceover: bool,
     /// Level of the recorded audio under a voice-over (0..1).
     pub duck_level: f64,
+    /// EQ, gate, compressor and limiter for the microphone.
+    pub voice: VoiceStrip,
+}
+
+/// A channel strip for the microphone, run in this order: low cut, gate,
+/// EQ, compressor, limiter. Each part has its own switch; the strip as a
+/// whole is off until it is turned on.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct VoiceStrip {
+    pub on: bool,
+    /// High-pass filter against rumble and handling noise.
+    pub low_cut: bool,
+    pub low_cut_hz: f64,
+    pub eq: bool,
+    /// Shelf around 120 Hz (dB).
+    pub bass_db: f64,
+    /// Bell at `presence_hz` (dB), for clarity.
+    pub presence_db: f64,
+    pub presence_hz: f64,
+    /// Shelf above 8 kHz (dB).
+    pub air_db: f64,
+    /// Turns the signal well down while it stays under `gate_db`.
+    pub gate: bool,
+    pub gate_db: f64,
+    pub compressor: bool,
+    pub threshold_db: f64,
+    pub ratio: f64,
+    pub makeup_db: f64,
+    /// Keeps every sample under `ceiling_db`.
+    pub limiter: bool,
+    pub ceiling_db: f64,
+}
+
+impl Default for VoiceStrip {
+    fn default() -> Self {
+        VoiceStrip {
+            on: false,
+            low_cut: true,
+            low_cut_hz: 80.0,
+            eq: true,
+            bass_db: 0.0,
+            presence_db: 0.0,
+            presence_hz: 3000.0,
+            air_db: 0.0,
+            gate: false,
+            gate_db: -50.0,
+            compressor: true,
+            threshold_db: -24.0,
+            ratio: 3.0,
+            makeup_db: 4.0,
+            limiter: true,
+            ceiling_db: -1.0,
+        }
+    }
 }
 
 impl Default for AudioStyle {
@@ -412,6 +467,7 @@ impl Default for AudioStyle {
             click_volume: 0.25,
             duck_under_voiceover: true,
             duck_level: 0.15,
+            voice: VoiceStrip::default(),
         }
     }
 }

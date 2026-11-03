@@ -493,6 +493,48 @@ fn transcribe_controls(ui: &mut Ui, ed: &mut Editor) {
     }
 }
 
+/// The microphone's channel strip: a switch for the whole strip, then each
+/// part with its own switch and settings, in the order they run.
+fn voice_strip(ui: &mut Ui, v: &mut VoiceStrip) {
+    toggle_row(ui, "Mix the voice", &mut v.on);
+    if !v.on {
+        caption(ui, "Low cut, EQ, noise gate, compressor and limiter for the microphone, like a channel strip in a DAW.");
+        return;
+    }
+    let part = |ui: &mut Ui, label: &str, on: &mut bool, add: &mut dyn FnMut(&mut Ui)| {
+        ui.add_space(4.0);
+        toggle_row(ui, label, on);
+        if *on {
+            ui.indent(label, |ui| add(ui));
+        }
+    };
+    part(ui, "Low cut", &mut v.low_cut, &mut |ui| {
+        widgets::slider_stepped(ui, "Below", &mut v.low_cut_hz, 20.0..=300.0, " Hz", Some(5.0), true);
+    });
+    part(ui, "EQ", &mut v.eq, &mut |ui| {
+        widgets::slider_stepped(ui, "Bass", &mut v.bass_db, -12.0..=12.0, " dB", Some(0.5), true);
+        widgets::slider_stepped(ui, "Presence", &mut v.presence_db, -12.0..=12.0, " dB", Some(0.5), true);
+        widgets::slider_stepped(ui, "Presence at", &mut v.presence_hz, 1000.0..=6000.0, " Hz", Some(100.0), true);
+        widgets::slider_stepped(ui, "Air", &mut v.air_db, -12.0..=12.0, " dB", Some(0.5), true);
+    });
+    part(ui, "Noise gate", &mut v.gate, &mut |ui| {
+        widgets::slider_stepped(ui, "Closes under", &mut v.gate_db, -80.0..=-20.0, " dB", Some(1.0), true);
+        caption(ui, "Quiets the room between words. Too high and it cuts the ends of words.");
+    });
+    part(ui, "Compressor", &mut v.compressor, &mut |ui| {
+        widgets::slider_stepped(ui, "Threshold", &mut v.threshold_db, -50.0..=0.0, " dB", Some(1.0), true);
+        widgets::slider_stepped(ui, "Ratio", &mut v.ratio, 1.0..=10.0, ":1", Some(0.5), true);
+        widgets::slider_stepped(ui, "Makeup", &mut v.makeup_db, 0.0..=18.0, " dB", Some(0.5), true);
+    });
+    part(ui, "Limiter", &mut v.limiter, &mut |ui| {
+        widgets::slider_stepped(ui, "Ceiling", &mut v.ceiling_db, -12.0..=0.0, " dB", Some(0.5), true);
+    });
+    ui.add_space(4.0);
+    if ui.button("Reset voice mix").clicked() {
+        *v = VoiceStrip { on: true, ..Default::default() };
+    }
+}
+
 fn audio(ui: &mut Ui, ed: &mut Editor, d: &mut Project) {
     let a = &mut d.style.audio;
     section(ui, "Audio", |ui| {
@@ -521,6 +563,9 @@ fn audio(ui: &mut Ui, ed: &mut Editor, d: &mut Project) {
             caption(ui, "This recording has no audio.");
         }
     });
+    if ed.rec.meta.mic.is_some() && !a.mute_mic {
+        section(ui, "Voice mix", |ui| voice_strip(ui, &mut a.voice));
+    }
     section(ui, "Background music", |ui| {
         ui.horizontal(|ui| {
             if ui.button("Choose…").clicked()
