@@ -651,10 +651,18 @@ pub enum EffectKind {
     Shake,
     /// The picture swells a little on every hit in the audio.
     Pulse,
+    /// The picture pushes in slowly between the zooms, so it never stands
+    /// still. Doesn't follow the audio.
+    Drift,
 }
 
 impl EffectKind {
-    pub const ALL: [(EffectKind, &'static str); 2] = [(EffectKind::Shake, "Shake"), (EffectKind::Pulse, "Pulse")];
+    pub const ALL: [(EffectKind, &'static str); 3] = [(EffectKind::Shake, "Shake"), (EffectKind::Pulse, "Pulse"), (EffectKind::Drift, "Drift")];
+
+    /// Whether it reacts to the hits in the audio.
+    pub fn follows_beat(self) -> bool {
+        self != EffectKind::Drift
+    }
 }
 
 /// An effect on the screen that follows the beat of the audio, over a time
@@ -747,6 +755,12 @@ impl Timeline {
     pub fn new_id(&mut self) -> u64 {
         self.next_id += 1;
         self.next_id
+    }
+
+    /// Whether any effect reacts to the hits in the audio, so they have to
+    /// be found.
+    pub fn needs_beats(&self) -> bool {
+        self.effects.iter().any(|e| e.kind.follows_beat())
     }
 }
 

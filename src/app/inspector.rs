@@ -797,6 +797,7 @@ fn mask_panel(ui: &mut Ui, ed: &mut Editor, d: &mut Project, id: u64) {
 
 fn effect_panel(ui: &mut Ui, ed: &mut Editor, d: &mut Project, id: u64) {
     let wanted = crate::project::beats::wanted(d, &ed.rec, &ed.package);
+    let duration = ed.rec.meta.duration_ms;
     let Some(e) = d.timeline.effects.iter_mut().find(|e| e.id == id) else { return };
     let mut delete = false;
     section(ui, "Effect", |ui| {
@@ -806,21 +807,27 @@ fn effect_panel(ui: &mut Ui, ed: &mut Editor, d: &mut Project, id: u64) {
             match e.kind {
                 EffectKind::Shake => "The picture jolts on every hit in the audio.",
                 EffectKind::Pulse => "The picture swells a little on every hit in the audio.",
+                EffectKind::Drift => "The picture pushes in slowly between your zooms, so it never stands still. Each stretch between zooms starts over.",
             },
         );
-        slider(ui, "Strength", &mut e.strength, 0.0..=1.0, "");
-        slider(ui, "Sensitivity", &mut e.sensitivity, 0.0..=1.0, "");
-        caption(ui, "Higher sensitivity reacts to softer hits too.");
-        caption(
-            ui,
-            &match &wanted {
-                None => "Nothing to follow: add background music in the Audio tab, or record the Mac's sound.".to_string(),
-                Some(_) if ed.beats_job.is_some() => "Finding the beats…".to_string(),
-                Some(w) if w.is_music() => format!("Follows the background music ({} hits found).", ed.rec.beats.beats.len()),
-                Some(_) => format!("Follows the recording's sound ({} hits found).", ed.rec.beats.beats.len()),
-            },
-        );
+        slider(ui, if e.kind.follows_beat() { "Strength" } else { "Amount" }, &mut e.strength, 0.0..=1.0, "");
+        if e.kind.follows_beat() {
+            slider(ui, "Sensitivity", &mut e.sensitivity, 0.0..=1.0, "");
+            caption(ui, "Higher sensitivity reacts to softer hits too.");
+            caption(
+                ui,
+                &match &wanted {
+                    None => "Nothing to follow: add background music in the Audio tab, or record the Mac's sound.".to_string(),
+                    Some(_) if ed.beats_job.is_some() => "Finding the beats…".to_string(),
+                    Some(w) if w.is_music() => format!("Follows the background music ({} hits found).", ed.rec.beats.beats.len()),
+                    Some(_) => format!("Follows the recording's sound ({} hits found).", ed.rec.beats.beats.len()),
+                },
+            );
+        }
         caption(ui, &format!("{} – {}", widgets::fmt_time(e.start), widgets::fmt_time(e.end)));
+        if ui.button("Whole clip").on_hover_text("Stretch the effect over the whole recording").clicked() {
+            (e.start, e.end) = (0.0, duration);
+        }
         ui.horizontal(|ui| {
             if ui.button("Delete effect").clicked() {
                 delete = true;

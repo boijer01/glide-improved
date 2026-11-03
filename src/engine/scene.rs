@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use super::animator::{Animator, Target};
 use super::beats::{self, Beats};
 use super::camera;
+use super::drift;
 use super::captions::{self, Line};
 use super::cursor::{self, ClickFx, CursorModel};
 use super::events::Events;
@@ -295,15 +296,22 @@ impl Scene {
 
     /// How the effects active at playback time `pb` move the window: a shift
     /// in output pixels (for a frame `height` px tall) and a scale about its
-    /// centre. Nothing when no effect is active or the audio has no hit.
+    /// centre. Nothing when no effect is active, and the beat effects do
+    /// nothing while the audio has no hit.
     fn effect_motion(&self, pb: f64, height: f64) -> (Vec2, f64) {
         let (mut shift, mut scale) = (Vec2::ZERO, 1.0);
-        if self.project.timeline.effects.is_empty() || self.beats.beats.is_empty() {
+        if self.project.timeline.effects.is_empty() {
             return (shift, scale);
         }
         let src = self.map.to_source(pb);
         let t = self.beats.time_at(pb, src);
         for e in self.project.timeline.effects.iter().filter(|e| src >= e.start && src <= e.end) {
+            if e.kind == EffectKind::Drift {
+                // Up to 12 % at full strength; the zooms (not the disabled ones) are left alone.
+                let zooms: Vec<(f64, f64)> = self.project.timeline.zooms.iter().filter(|z| !z.disabled).map(|z| (z.start, z.end)).collect();
+                scale *= drift::scale(src, e.start, e.end, &zooms, 0.12 * e.strength);
+                continue;
+            }
             let Some(p) = beats::pulse(&self.beats.beats, t, beats::threshold(e.sensitivity)) else { continue };
             let strength = e.strength * beats::edge_gain(src, e.start, e.end, Effect::FADE_MS);
             match e.kind {
@@ -312,6 +320,7 @@ impl Scene {
                     shift = shift + v2(dx, dy);
                 }
                 EffectKind::Pulse => scale *= beats::pulse_scale(p, strength),
+                EffectKind::Drift => {}
             }
         }
         (shift, scale)
@@ -730,6 +739,34 @@ mod tests {
         let mut p = Project::default();
         p.timeline.effects.push(Effect { id: 1, start: 2000.0, end: 8000.0, kind, strength: 1.0, sensitivity: 0.5 });
         (p, rec)
+    }
+
+    #[test]
+    fn drift_pushes_in_between_zooms_and_leaves_them_alone() {
+        // The recording is 10 s; a zoom over 4..6 s, a drift over all of it, at full strength (12 %).
+        let (mut p, rec) = with_effect(EffectKind::Drift);
+        p.timeline.effects[0].start = 0.0;
+        p.timeline.effects[0].end = 10_000.0;
+        p.timeline.zooms.push(Zoom { start: 4000.0, end: 6000.0, scale: 2.0, ..Default::default() });
+        let mut without = p.clone();
+        without.timeline.effects.clear();
+        let mut plain = Scene::new(without, &rec, 60.0);
+        let mut fx = Scene::new(p, &rec, 60.0);
+        let width =|s: &mut Scene, ms: f64| s.frame(ms, 1080.0).window.rect.w;
+        let ratio = |ms: f64, fx: &mut Scene, plain: &mut Scene| width(fx, ms) / width(plain, ms);
+        // The first calm stretch is 0..4 s, so at its end it is back at rest; before that it has pushed in.
+        assert!((ratio(0.0, &mut fx, &mut plain) - 1.0).abs() < 1e-9);
+        let early = ratio(1000.0, &mut fx, &mut plain);
+        let late = ratio(3400.0, &mut fx, &mut plain);
+        assert!(1.0 < early && early < late, "{early} {late}");
+        // It is 4 s long, so it reaches 12 % x 4/6 of the way at most.
+        assert!(late <= 1.0 + 0.12 * (4000.0 / 6000.0) + 1e-9);
+        // Nothing during the zoom, and a new push-in after it.
+        assert!((ratio(5000.0, &mut fx, &mut plain) - 1.0).abs() < 1e-9);
+        assert!(ratio(9000.0, &mut fx, &mut plain) > 1.0);
+        // It zooms about the window's centre and only scales.
+        let (a, b) = (fx.frame(3400.0, 1080.0).window.rect, plain.frame(3400.0, 1080.0).window.rect);
+        assert!((a.center() - b.center()).length() < 1e-6);
     }
 
     #[test]

@@ -75,7 +75,7 @@ pub fn analyze(pkg: &Package, want: &Wanted) -> Result<Beats> {
 /// there is nothing to keep responsive.
 pub fn ensure(pkg: &Package, project: &Project, rec: &mut Recording) -> Result<()> {
     rec.beats = match wanted(project, rec, pkg) {
-        Some(want) if !project.timeline.effects.is_empty() => analyze(pkg, &want)?,
+        Some(want) if project.timeline.needs_beats() => analyze(pkg, &want)?,
         _ => Beats::default(),
     };
     Ok(())
