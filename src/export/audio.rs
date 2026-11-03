@@ -351,6 +351,8 @@ fn stems_unmastered(project: &Project, rec: &Recording, dir: Option<&Path>, map:
             {
                 mic = cleaned(dir, &t.file, t.track, mic);
             }
+            // The whole track, before it is cut to the edit.
+            super::strip::process(&mut mic, &style.voice);
             retime(&mic, map, |i| slices.get(i).map_or(1.0, |s| s.mic_volume as f32), &mut mic_out);
             any_mic = true;
         }

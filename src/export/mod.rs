@@ -7,6 +7,7 @@
 pub mod audio;
 pub mod isolate;
 pub mod gif;
+pub mod strip;
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
