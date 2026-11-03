@@ -818,7 +818,10 @@ impl Editor {
         if cmd && pressed(egui::Key::S) {
             self.save();
         }
-        if pressed(egui::Key::Delete) || pressed(egui::Key::Backspace) {
+        // ⌘X deletes too, as in CapCut. egui turns it into a Cut event, never
+        // a key press.
+        let cut = ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Cut)));
+        if pressed(egui::Key::Delete) || pressed(egui::Key::Backspace) || cut {
             self.delete_selection();
         }
         if !cmd && pressed(egui::Key::Q) {
@@ -1244,7 +1247,7 @@ impl Editor {
                         self.looping = !self.looping;
                     }
                     if widgets::glyph_button(ui, Glyph::Trash, 18.0, false, self.selection != Selection::None)
-                        .on_hover_text("Delete the selected item (Delete)")
+                        .on_hover_text("Delete the selected item (Delete or ⌘X)")
                         .clicked()
                     {
                         self.delete_selection();
