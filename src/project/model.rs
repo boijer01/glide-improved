@@ -506,6 +506,9 @@ pub struct Style {
     pub audio: AudioStyle,
     /// Zoom level used for new automatic zooms.
     pub default_zoom: f64,
+    /// Between zooms, keep the previous zoom's level instead of going back
+    /// to the full screen.
+    pub stay_zoomed: bool,
     pub device: DeviceFrame,
 }
 
@@ -528,6 +531,7 @@ impl Default for Style {
             captions: CaptionStyle::default(),
             audio: AudioStyle::default(),
             default_zoom: 2.0,
+            stay_zoomed: false,
             device: DeviceFrame::None,
         }
     }
